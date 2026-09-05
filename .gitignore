@@ -2,3 +2,4 @@
 .analytics-dashboard-token
 .analytics-dashboard-auth.json
 server.py
+.wrangler/
