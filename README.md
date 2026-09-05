@@ -1,17 +1,23 @@
 # Analytics Dashboard
 
-The dashboard is ready for GitHub Pages. It uses Supabase Auth in the browser and sends the user's
-short-lived session token to the protected `download-analytics-report` Edge Function. The public
-Supabase anon key in `index.html` is designed for browser use; service-role keys and the legacy
-dashboard token must never be committed.
+Production: <https://download-analytics-dashboard.pages.dev/>
 
-## GitHub Pages
+The dashboard is hosted by Cloudflare Pages. `_worker.js` handles authenticated sessions and
+proxies report requests to the protected Supabase Edge Function. The browser never receives the
+dashboard token, password hash, or Supabase service-role key.
 
-1. Deploy `download-analytics-report` after setting `ANALYTICS_ADMIN_EMAIL` to the authorized email.
-2. Create a public GitHub repository containing this directory.
-3. In **Settings → Pages**, deploy from the `main` branch and `/ (root)`.
-4. Add the resulting Pages URL to Supabase **Authentication → URL Configuration → Redirect URLs**.
-5. Open the Pages URL and use **Email me a sign-in link** the first time.
+The following values are encrypted Cloudflare Pages production secrets and must never be committed:
+
+- `DASHBOARD_AUTH_JSON`
+- `ANALYTICS_DASHBOARD_TOKEN`
+- `SESSION_SIGNING_KEY`
+
+Deploy the static page and Worker with Wrangler:
+
+```sh
+npx wrangler pages deploy <directory-containing-index-and-worker> \
+  --project-name download-analytics-dashboard --branch main
+```
 
 ## Optional local server
 
@@ -23,14 +29,10 @@ python3 analytics-dashboard/server.py
 
 Then open `http://127.0.0.1:8765` and sign in. Do not open `index.html` directly.
 
-The local server keeps both legacy secrets out of the browser:
+The local server keeps both secrets out of the browser:
 
 - `.analytics-dashboard-auth.json` contains the authorized email and a salted PBKDF2 password hash.
 - `.analytics-dashboard-token` contains the protected Edge Function token.
 
 Both files are ignored by Git. Successful login creates an HttpOnly, SameSite session that expires
-after eight hours. Five failed attempts from the same client trigger a 15-minute lockout.
-
-The hosted page calls the protected Edge Function with a Supabase user session. The Supabase
-service-role key is supplied to the function by Supabase and is never stored locally, committed,
-or exposed to the browser.
+after eight hours. Five recent failed attempts from the same client trigger a 15-minute lockout.
