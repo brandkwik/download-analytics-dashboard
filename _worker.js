@@ -17,10 +17,6 @@ function fromBase64url(value) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-function hex(bytes) {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 function constantTimeEqual(left, right) {
   const length = Math.max(left.length, right.length);
   let different = left.length ^ right.length;
@@ -30,18 +26,18 @@ function constantTimeEqual(left, right) {
   return different === 0;
 }
 
+async function secureEqual(left, right) {
+  const [leftDigest, rightDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(left)),
+    crypto.subtle.digest("SHA-256", encoder.encode(right)),
+  ]);
+  return crypto.subtle.timingSafeEqual(leftDigest, rightDigest);
+}
+
 async function hmac(value, secret) {
   const key = await crypto.subtle.importKey("raw", encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return base64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value))));
-}
-
-async function passwordHash(password, salt, iterations) {
-  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({
-    name: "PBKDF2", hash: "SHA-256", salt: Uint8Array.from(salt.match(/.{2}/g), (part) => parseInt(part, 16)), iterations,
-  }, key, 256);
-  return hex(new Uint8Array(bits));
 }
 
 function cookieValue(request) {
@@ -75,10 +71,10 @@ async function login(request, env) {
   if (recent.length >= 5) return response({ error: "Too many attempts. Try again in 15 minutes." }, 429);
   try {
     const input = await request.json();
-    const config = JSON.parse(env.DASHBOARD_AUTH_JSON);
     const email = String(input.email || "").trim().toLowerCase();
-    const candidate = await passwordHash(String(input.password || ""), config.salt, Number(config.iterations));
-    if (!constantTimeEqual(email, String(config.email).toLowerCase()) || !constantTimeEqual(candidate, config.password_hash)) throw new Error("invalid");
+    const emailMatches = await secureEqual(email, String(env.DASHBOARD_LOGIN_EMAIL || "").toLowerCase());
+    const passwordMatches = await secureEqual(String(input.password || ""), String(env.DASHBOARD_PASSWORD || ""));
+    if (!emailMatches || !passwordMatches) throw new Error("invalid");
     attempts.delete(client);
     const payload = base64url(encoder.encode(JSON.stringify({ email, expires: now + SESSION_SECONDS * 1000 })));
     const signed = `${payload}.${await hmac(payload, env.SESSION_SIGNING_KEY)}`;
